@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { Dialog } from '@headlessui/react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import ImageUpload from '../Images/ImageUpload';
+import PreservationCardTemplate from './PreservationCardTemplate';
+import ReactDOMServer from 'react-dom/server';
+import { artifactApi } from '../../services/api';
 
 interface PreservationLog {
   id?: string;
@@ -230,6 +233,30 @@ const PreservationModal: React.FC<PreservationModalProps> = ({
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
               >
                 취소
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const artifactSummary = {
+                    id: artifactId,
+                    name: formData.description ? formData.description.split('\n')[0] || '유물' : '유물',
+                    number: artifactId,
+                    category: '',
+                    era: '',
+                    processor: formData.performed_by,
+                    excavation_site: ''
+                  };
+                  const html = ReactDOMServer.renderToStaticMarkup(
+                    React.createElement(PreservationCardTemplate, { artifact: artifactSummary, log: formData })
+                  );
+                  try {
+                    const result = await artifactApi.exportPreservationCardHTML(artifactId, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>보존처리카드</title></head><body>${html}</body></html>`, `preservation-card-${artifactId}`);
+                    window.open(`http://localhost:3001${result.file_path}`, '_blank');
+                  } catch {}
+                }}
+                className="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-100 border border-blue-300 rounded-lg hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                템플릿 생성
               </button>
               <button
                 type="submit"

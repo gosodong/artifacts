@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useImageStore } from '../stores/imageStore'
 import { useAuthStore } from '../stores/authStore'
 import { Upload, Search, Grid, List, Plus, Trash2, Eye } from 'lucide-react'
+import CloudIntegration from '../components/Settings/CloudIntegration'
+import BackupRestore from '../components/Settings/BackupRestore'
 
 export default function ImageManager() {
   const navigate = useNavigate()
@@ -120,7 +122,7 @@ export default function ImageManager() {
               <input
                 type="file"
                 multiple
-                accept="image/*,.svg,.pdf"
+                accept="image/*,.svg,.pdf,.psd"
                 onChange={handleFileUpload}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                 disabled={isUploading}
@@ -137,9 +139,15 @@ export default function ImageManager() {
 
           {/* 파일 형식 안내 */}
           <div className="mt-4 text-sm text-gray-500">
-            <p>지원 형식: JPG, PNG, SVG, PDF</p>
+            <p>지원 형식: JPG, PNG, SVG, PDF, PSD</p>
           </div>
         </div>
+
+        {/* 클라우드 연동 설정 */}
+        <CloudIntegration />
+
+        {/* 백업 및 복구 */}
+        <BackupRestore />
 
         {/* 오류 메시지 */}
         {error && (

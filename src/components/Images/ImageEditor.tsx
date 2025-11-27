@@ -4,16 +4,20 @@ import {
   BackspaceIcon, 
   ArrowUturnLeftIcon, 
   ArrowUturnRightIcon,
-  CircleStackIcon
+  CircleStackIcon,
+  Cog6ToothIcon,
+  ChevronDownIcon,
+  ChevronUpIcon
 } from '@heroicons/react/24/outline';
 
-interface Point {
+interface StrokePoint {
   x: number;
   y: number;
+  w: number;
 }
 
 interface DrawingPath {
-  points: Point[];
+  points: StrokePoint[];
   color: string;
   width: number;
   tool: 'pen' | 'highlighter' | 'eraser';
@@ -44,6 +48,8 @@ const ImageEditor: React.FC<ImageEditorProps> = ({
   const [history, setHistory] = useState<DrawingPath[][]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState(false);
 
   // 색상 팔레트
   const colors = [
@@ -130,46 +136,43 @@ const ImageEditor: React.FC<ImageEditorProps> = ({
   const drawPath = (ctx: CanvasRenderingContext2D, path: DrawingPath) => {
     if (path.points.length < 2) return;
 
-    ctx.beginPath();
-    ctx.moveTo(path.points[0].x, path.points[0].y);
-
-    // 곡선으로 부드럽게 그리기
-    for (let i = 1; i < path.points.length - 1; i++) {
-      const midPoint = {
-        x: (path.points[i].x + path.points[i + 1].x) / 2,
-        y: (path.points[i].y + path.points[i + 1].y) / 2
-      };
-      ctx.quadraticCurveTo(path.points[i].x, path.points[i].y, midPoint.x, midPoint.y);
+    for (let i = 1; i < path.points.length; i++) {
+      const p0 = path.points[i - 1];
+      const p1 = path.points[i];
+      ctx.globalCompositeOperation = path.tool === 'eraser' ? 'destination-out' : 'source-over';
+      ctx.strokeStyle = path.tool === 'highlighter' ? `${path.color}40` : path.color;
+      const baseWidth = path.tool === 'highlighter' ? path.width * 3 : path.width;
+      const segWidth = Math.max(0.5, baseWidth * (p1.w || 1));
+      ctx.lineWidth = segWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      const mx = (p0.x + p1.x) / 2;
+      const my = (p0.y + p1.y) / 2;
+      ctx.moveTo(p0.x, p0.y);
+      ctx.quadraticCurveTo(p0.x, p0.y, mx, my);
+      ctx.stroke();
     }
-
-    // 마지막 점까지 그리기
-    if (path.points.length > 1) {
-      const lastPoint = path.points[path.points.length - 1];
-      ctx.lineTo(lastPoint.x, lastPoint.y);
-    }
-
-    // 스타일 적용
-    ctx.globalCompositeOperation = path.tool === 'eraser' ? 'destination-out' : 'source-over';
-    ctx.strokeStyle = path.tool === 'highlighter' ? `${path.color}40` : path.color;
-    ctx.lineWidth = path.tool === 'highlighter' ? path.width * 3 : path.width;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    
-    ctx.stroke();
   };
 
   // 마우스/터치 이벤트
-  const getPoint = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>): Point => {
+  const getPoint = (e: React.PointerEvent<HTMLCanvasElement> | React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>): StrokePoint => {
     const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
+    if (!canvas) return { x: 0, y: 0, w: 1 };
 
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
     let clientX, clientY;
-    
-    if ('touches' in e) {
+    let pressure = 1;
+
+    if ('pointerType' in e) {
+      clientX = (e as React.PointerEvent).clientX;
+      clientY = (e as React.PointerEvent).clientY;
+      const p = (e as React.PointerEvent).pressure;
+      pressure = typeof p === 'number' && p > 0 ? p : 1;
+    } else if ('touches' in e) {
       clientX = e.touches[0].clientX;
       clientY = e.touches[0].clientY;
     } else {
@@ -179,11 +182,12 @@ const ImageEditor: React.FC<ImageEditorProps> = ({
 
     return {
       x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY
+      y: (clientY - rect.top) * scaleY,
+      w: Math.min(1, Math.max(0.2, pressure))
     };
   };
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     
     if (!imageLoaded) return;
@@ -198,9 +202,10 @@ const ImageEditor: React.FC<ImageEditorProps> = ({
     
     setCurrentPath(newPath);
     setIsDrawing(true);
+    (e.currentTarget as HTMLCanvasElement).setPointerCapture(e.pointerId);
   };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     
     if (!isDrawing || !currentPath || !imageLoaded) return;
@@ -263,87 +268,107 @@ const ImageEditor: React.FC<ImageEditorProps> = ({
 
   return (
     <div className="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden">
-      {/* Toolbar */}
-      <div className="bg-gray-50 border-b border-gray-200 p-4">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          {/* Tools */}
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setCurrentTool('pen')}
-              className={`p-2 rounded-lg transition-colors ${
-                currentTool === 'pen' 
-                  ? 'bg-blue-100 text-blue-700 border border-blue-300' 
-                  : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
-              }`}
-              title="펜"
-            >
-              <PencilIcon className="h-5 w-5" />
-            </button>
-            
-            <button
-              onClick={() => setCurrentTool('highlighter')}
-              className={`p-2 rounded-lg transition-colors ${
-                currentTool === 'highlighter' 
-                  ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' 
-                  : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
-              }`}
-              title="형광펜"
-            >
-              <CircleStackIcon className="h-5 w-5" />
-            </button>
-            
-            <button
-              onClick={() => setCurrentTool('eraser')}
-              className={`p-2 rounded-lg transition-colors ${
-                currentTool === 'eraser' 
-                  ? 'bg-red-100 text-red-700 border border-red-300' 
-                  : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
-              }`}
-              title="지우개"
-            >
-              <BackspaceIcon className="h-5 w-5" />
-            </button>
-          </div>
-
-          {/* Colors */}
-          <div className="flex items-center space-x-2">
-            {colors.map(color => (
+      {/* Compact Toolbar */}
+      <div className="bg-gray-50 border-b border-gray-200 p-3">
+        <div className="flex items-center justify-between gap-3">
+          {/* Left: Drawing Tools */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center bg-white rounded-lg border border-gray-300 p-1">
               <button
-                key={color}
-                onClick={() => setCurrentColor(color)}
-                className={`w-8 h-8 rounded-full border-2 transition-all ${
-                  currentColor === color 
-                    ? 'border-gray-800 scale-110' 
-                    : 'border-gray-300 hover:border-gray-500'
+                onClick={() => setCurrentTool('pen')}
+                className={`p-2 rounded transition-colors ${
+                  currentTool === 'pen' 
+                    ? 'bg-blue-500 text-white' 
+                    : 'text-gray-600 hover:bg-gray-100'
                 }`}
-                style={{ backgroundColor: color }}
-                title={color}
-              />
-            ))}
-          </div>
+                title="펜"
+              >
+                <PencilIcon className="h-5 w-5" />
+              </button>
+              
+              <button
+                onClick={() => setCurrentTool('highlighter')}
+                className={`p-2 rounded transition-colors ${
+                  currentTool === 'highlighter' 
+                    ? 'bg-yellow-500 text-white' 
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+                title="형광펜"
+              >
+                <CircleStackIcon className="h-5 w-5" />
+              </button>
+              
+              <button
+                onClick={() => setCurrentTool('eraser')}
+                className={`p-2 rounded transition-colors ${
+                  currentTool === 'eraser' 
+                    ? 'bg-red-500 text-white' 
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+                title="지우개"
+              >
+                <BackspaceIcon className="h-5 w-5" />
+              </button>
+            </div>
 
-          {/* Width */}
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-600">굵기:</span>
-            <select
-              value={currentWidth}
-              onChange={(e) => setCurrentWidth(Number(e.target.value))}
-              className="px-2 py-1 border border-gray-300 rounded text-sm"
+            {/* Color Picker Button */}
+            <div className="relative">
+              <button
+                onClick={() => setShowColorPicker(!showColorPicker)}
+                className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                title="색상 선택"
+              >
+                <div 
+                  className="w-6 h-6 rounded border-2 border-gray-300"
+                  style={{ backgroundColor: currentColor }}
+                />
+                <ChevronDownIcon className={`h-4 w-4 text-gray-500 transition-transform ${showColorPicker ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {showColorPicker && (
+                <div className="absolute top-full left-0 mt-2 p-3 bg-white border border-gray-300 rounded-lg shadow-lg z-10">
+                  <div className="grid grid-cols-5 gap-2">
+                    {colors.map(color => (
+                      <button
+                        key={color}
+                        onClick={() => {
+                          setCurrentColor(color);
+                          setShowColorPicker(false);
+                        }}
+                        className={`w-8 h-8 rounded border-2 transition-all hover:scale-110 ${
+                          currentColor === color 
+                            ? 'border-gray-800 ring-2 ring-blue-500' 
+                            : 'border-gray-300'
+                        }`}
+                        style={{ backgroundColor: color }}
+                        title={color}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Settings Button */}
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className={`p-2 rounded-lg border transition-colors ${
+                showSettings 
+                  ? 'bg-gray-200 text-gray-700 border-gray-400' 
+                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+              }`}
+              title="설정"
             >
-              {widths.map(width => (
-                <option key={width} value={width}>
-                  {width}px
-                </option>
-              ))}
-            </select>
+              <Cog6ToothIcon className="h-5 w-5" />
+            </button>
           </div>
 
-          {/* History */}
-          <div className="flex items-center space-x-2">
+          {/* Center: History Controls */}
+          <div className="flex items-center bg-white rounded-lg border border-gray-300 p-1">
             <button
               onClick={undo}
               disabled={historyIndex <= 0}
-              className="p-2 rounded-lg bg-white text-gray-600 border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="p-2 rounded text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               title="실행 취소"
             >
               <ArrowUturnLeftIcon className="h-5 w-5" />
@@ -352,30 +377,64 @@ const ImageEditor: React.FC<ImageEditorProps> = ({
             <button
               onClick={redo}
               disabled={historyIndex >= history.length - 1}
-              className="p-2 rounded-lg bg-white text-gray-600 border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="p-2 rounded text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               title="재실행"
             >
               <ArrowUturnRightIcon className="h-5 w-5" />
             </button>
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center space-x-2">
+          {/* Right: Actions */}
+          <div className="flex items-center gap-2">
             <button
               onClick={onCancel}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
               취소
             </button>
             
             <button
               onClick={saveImage}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700"
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
             >
               저장
             </button>
           </div>
         </div>
+
+        {/* Settings Panel (Collapsible) */}
+        {showSettings && (
+          <div className="mt-3 pt-3 border-t border-gray-200">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">굵기:</span>
+                <div className="flex items-center gap-1">
+                  {widths.map(width => (
+                    <button
+                      key={width}
+                      onClick={() => setCurrentWidth(width)}
+                      className={`px-3 py-1 text-sm rounded transition-colors ${
+                        currentWidth === width
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {width}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">
+                  현재 도구: <span className="font-medium text-gray-700">
+                    {currentTool === 'pen' ? '펜' : currentTool === 'highlighter' ? '형광펜' : '지우개'}
+                  </span>
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Canvas */}
@@ -385,26 +444,21 @@ const ImageEditor: React.FC<ImageEditorProps> = ({
             ref={canvasRef}
             className="border border-gray-300 rounded-lg bg-white cursor-crosshair touch-none"
             style={{ maxWidth: '100%', height: 'auto' }}
-            onMouseDown={startDrawing}
-            onMouseMove={draw}
-            onMouseUp={stopDrawing}
-            onMouseLeave={stopDrawing}
-            onTouchStart={startDrawing}
-            onTouchMove={draw}
-            onTouchEnd={stopDrawing}
+            onPointerDown={startDrawing}
+            onPointerMove={draw}
+            onPointerUp={stopDrawing}
+            onPointerLeave={stopDrawing}
             width={width}
             height={height}
           />
         </div>
       </div>
 
-      {/* Instructions */}
-      <div className="bg-gray-50 border-t border-gray-200 p-4">
-        <div className="text-sm text-gray-600 space-y-1">
-          <p>• 마우스나 터치로 그림을 그릴 수 있습니다.</p>
-          <p>• 도구, 색상, 굵기를 선택하여 다양한 효과를 낼 수 있습니다.</p>
-          <p>• 실행 취소/재실행 버튼으로 실수를 되돌릴 수 있습니다.</p>
-        </div>
+      {/* Compact Instructions */}
+      <div className="bg-gray-50 border-t border-gray-200 px-4 py-2">
+        <p className="text-xs text-gray-500 text-center">
+          마우스나 터치로 그림을 그릴 수 있습니다 • 설정 버튼으로 굵기 조절
+        </p>
       </div>
     </div>
   );

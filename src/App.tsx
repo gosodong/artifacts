@@ -19,6 +19,7 @@ function App() {
           <Route path="/projects" element={<Projects />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/settings" element={<Settings />} />
+          
         </Routes>
       </Layout>
     </Router>

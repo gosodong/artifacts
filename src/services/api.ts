@@ -197,6 +197,152 @@ export const artifactApi = {
     if (!result.success) throw new Error(result.error || 'Failed to rotate image');
     return result.data || { rotated: false };
   },
+
+  // 이미지 내보내기
+  exportImage: async (
+    artifactId: string,
+    imagePath: string,
+    format: 'png' | 'jpg' | 'jpeg' | 'webp' | 'tiff',
+    quality?: number
+  ): Promise<{ file_path: string; format: string }> => {
+    const response = await fetch(`${API_BASE_URL}/artifacts/${artifactId}/images/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_path: imagePath, format, quality })
+    });
+    const result = await handleResponse<{ file_path: string; format: string }>(response);
+    if (!result.data) throw new Error('Failed to export image');
+    return result.data;
+  },
+
+  // 어노테이션을 SVG로 내보내기
+  exportAnnotationsToSVG: async (
+    artifactId: string,
+    svg: string,
+    name?: string
+  ): Promise<{ file_path: string }> => {
+    const response = await fetch(`${API_BASE_URL}/artifacts/${artifactId}/annotations/export-svg`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ svg, name })
+    });
+    const result = await handleResponse<{ file_path: string }>(response);
+    if (!result.data) throw new Error('Failed to export SVG');
+    return result.data;
+  },
+
+  exportPreservationCardHTML: async (
+    artifactId: string,
+    html: string,
+    name?: string
+  ): Promise<{ file_path: string }> => {
+    const response = await fetch(`${API_BASE_URL}/artifacts/${artifactId}/preservation-card/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html, name })
+    });
+    const result = await handleResponse<{ file_path: string }>(response);
+    if (!result.data) throw new Error('Failed to export preservation card');
+    return result.data;
+  },
+
+  // 타임랩스 프레임 저장
+  saveTimelapseFrame: async (
+    artifactId: string,
+    dataUrl: string,
+    timelineId: string,
+    stepIndex?: number,
+    annotations?: unknown
+  ): Promise<{ file_path: string; timeline_id: string; step_index: number | null }> => {
+    const response = await fetch(`${API_BASE_URL}/artifacts/${artifactId}/timelapse/frame`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data_url: dataUrl, timeline_id: timelineId, step_index: stepIndex, annotations })
+    });
+    const result = await handleResponse<{ file_path: string; timeline_id: string; step_index: number | null }>(response);
+    if (!result.data) throw new Error('Failed to save timelapse frame');
+    return result.data;
+  },
+
+  // 타임랩스 프레임 조회
+  getTimelapseFrames: async (
+    artifactId: string,
+    timelineId: string
+  ): Promise<Array<{ file_path: string; file_name: string; step_index: number | null }>> => {
+    const response = await fetch(`${API_BASE_URL}/artifacts/${artifactId}/timelapse/${timelineId}`);
+    const result = await handleResponse<Array<{ file_path: string; file_name: string; step_index: number | null }>>(response);
+    if (!result.data) return [];
+    return result.data;
+  },
+
+  // 통합 상태 조회
+  getIntegrationStatus: async (): Promise<{ google: { client_id: boolean; client_secret: boolean; redirect_uri: string }; onedrive: { client_id: boolean; client_secret: boolean; redirect_uri: string } }> => {
+    const response = await fetch(`${API_BASE_URL}/integrations/status`)
+    const result = await handleResponse<{ google: { client_id: boolean; client_secret: boolean; redirect_uri: string }; onedrive: { client_id: boolean; client_secret: boolean; redirect_uri: string } }>(response)
+    if (!result.data) throw new Error('Failed to get integration status')
+    return result.data
+  },
+
+  // Google OAuth 시작 URL
+  getGoogleStartUrl: async (): Promise<string> => {
+    const response = await fetch(`${API_BASE_URL}/integrations/google/start`)
+    const result = await handleResponse<{ url: string }>(response)
+    if (!result.data) throw new Error('Failed to get Google start URL')
+    return result.data.url
+  },
+
+  // OneDrive OAuth 시작 URL
+  getOneDriveStartUrl: async (): Promise<string> => {
+    const response = await fetch(`${API_BASE_URL}/integrations/onedrive/start`)
+    const result = await handleResponse<{ url: string }>(response)
+    if (!result.data) throw new Error('Failed to get OneDrive start URL')
+    return result.data.url
+  },
+
+  // 토큰 저장
+  saveIntegrationToken: async (provider: 'google' | 'onedrive', token: unknown): Promise<{ stored: boolean; file: string }> => {
+    const response = await fetch(`${API_BASE_URL}/integrations/${provider}/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token })
+    })
+    const result = await handleResponse<{ stored: boolean; file: string }>(response)
+    if (!result.data) throw new Error('Failed to store integration token')
+    return result.data
+  },
+
+  // 백업
+  listBackups: async (): Promise<Array<{ name: string; created_at: string }>> => {
+    const response = await fetch(`${API_BASE_URL}/backup/list`)
+    const result = await handleResponse<Array<{ name: string; created_at: string }>>(response)
+    return result.data || []
+  },
+  createBackup: async (): Promise<{ name: string; path: string }> => {
+    const response = await fetch(`${API_BASE_URL}/backup/create`, { method: 'POST' })
+    const result = await handleResponse<{ name: string; path: string }>(response)
+    if (!result.data) throw new Error('Failed to create backup')
+    return result.data
+  },
+  restoreBackup: async (name: string): Promise<{ restored: boolean; name: string }> => {
+    const response = await fetch(`${API_BASE_URL}/backup/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+    const result = await handleResponse<{ restored: boolean; name: string }>(response)
+    if (!result.data) throw new Error('Failed to restore backup')
+    return result.data
+  },
+
+  // 파일 암호 보호
+  protectFile: async (artifactId: string, filePath: string, password: string): Promise<{ file_path: string }> => {
+    const response = await fetch(`${API_BASE_URL}/artifacts/${artifactId}/protect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_path: filePath, password }) })
+    const result = await handleResponse<{ file_path: string }>(response)
+    if (!result.data) throw new Error('Failed to protect file')
+    return result.data
+  },
+  unprotectFile: async (artifactId: string, encPath: string, password: string): Promise<{ file_path: string }> => {
+    const response = await fetch(`${API_BASE_URL}/artifacts/${artifactId}/unprotect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_path: encPath, password }) })
+    const result = await handleResponse<{ file_path: string }>(response)
+    if (!result.data) throw new Error('Failed to unprotect file')
+    return result.data
+  },
 };
 
 // 노트 타입

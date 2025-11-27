@@ -4,8 +4,12 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import db, { initializeDatabase } from './database/connection.js';
+import db, { initializeDatabase } from './database/connection.ts';
 import artifactRoutes from './routes/artifacts.js';
+import integrationRoutes from './routes/integrations.js';
+import backupRoutes from './routes/backup.js';
+import healthRoutes from './routes/health.js';
+import { optionalAuth } from './middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,10 +28,14 @@ const limiter = rateLimit({
 if (process.env.NODE_ENV === 'production') {
   app.use(limiter);
 }
+const allowed = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean)
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://your-domain.com'] 
-    : ['http://localhost:5173', 'http://localhost:4173', 'http://localhost:3001'],
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true)
+    if (allowed.length) return cb(null, allowed.includes(origin))
+    const dev = ['http://localhost:5173', 'http://localhost:4173', 'http://localhost:3001']
+    cb(null, dev.includes(origin))
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -94,6 +102,9 @@ initializeDatabase();
 
 // Routes
 app.use('/api', artifactRoutes);
+app.use('/api', integrationRoutes);
+app.use('/api', optionalAuth, backupRoutes);
+app.use('/api', healthRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

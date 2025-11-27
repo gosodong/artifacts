@@ -25,6 +25,10 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [autoUploadEnabled, setAutoUploadEnabled] = useState(true);
+  const [autoUploadInterval, setAutoUploadInterval] = useState(5);
+  const [uploadQueue, setUploadQueue] = useState<Array<{ file: File; blobUrl: string }>>([]);
+  const [processing, setProcessing] = useState(false);
 
   // 이미지 편집 모달 상태
   const [showEditor, setShowEditor] = useState(false);
@@ -77,12 +81,12 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
 
-        if (file.size > 10 * 1024 * 1024) {
-          toast.error(`${file.name} 파일이 너무 큽니다. (최대 10MB)`);
+        if (file.size > 200 * 1024 * 1024) {
+          toast.error(`${file.name} 파일이 너무 큽니다. (최대 200MB)`);
           continue;
         }
 
-        const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+        const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/tiff', 'application/pdf', 'image/svg+xml', 'image/psd'];
         if (!allowedTypes.includes(file.type)) {
           toast.error(`${file.name} 파일 형식이 지원되지 않습니다.`);
           continue;
@@ -92,7 +96,8 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
         if (artifactId === 'new') {
           const tempImageUrl = URL.createObjectURL(file);
           newImages.push(tempImageUrl);
-          toast.success(`${file.name} 준비 완료`);
+          setUploadQueue((q) => [...q, { file, blobUrl: tempImageUrl }]);
+          toast.success(`${file.name} 준비 완료 (자동 업로드 대기)`);
         } else {
           try {
             const result = await artifactApi.uploadImage(artifactId, file);
@@ -114,6 +119,32 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
+
+  React.useEffect(() => {
+    if (!autoUploadEnabled || artifactId === 'new') return;
+    if (processing) return;
+    if (uploadQueue.length === 0) return;
+    setProcessing(true);
+    const id = setInterval(async () => {
+      if (uploadQueue.length === 0) return;
+      const item = uploadQueue[0];
+      try {
+        const result = await artifactApi.uploadImage(artifactId, item.file);
+        onImagesChange(
+          [...currentImages.filter((u) => u !== item.blobUrl), result.file_path]
+        );
+        URL.revokeObjectURL(item.blobUrl);
+        setUploadQueue((q) => q.slice(1));
+        toast.success(`${item.file.name} 자동 업로드 완료`);
+      } catch {
+        toast.error(`${item.file.name} 자동 업로드 실패, 재시도 예정`);
+      }
+    }, Math.max(2, autoUploadInterval) * 1000);
+    return () => {
+      clearInterval(id);
+      setProcessing(false);
+    };
+  }, [autoUploadEnabled, autoUploadInterval, artifactId, uploadQueue.length, processing, currentImages]);
 
   const handleRemoveImage = async (index: number) => {
     const imageUrl = currentImages[index];
@@ -286,7 +317,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
             ref={fileInputRef}
             type="file"
             multiple
-            accept="image/*"
+            accept="image/*,.tif,.tiff,.pdf,.svg,.psd,.ai"
             onChange={handleFileSelect}
             className="hidden"
             disabled={isUploading}
@@ -308,7 +339,22 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
               {isUploading ? '업로드 중...' : '이미지 추가'}
             </button>
 
-            <span className="text-xs text-gray-400">PNG, JPG, WEBP (최대 10MB)</span>
+            <span className="text-xs text-gray-400">PNG, JPG, WEBP, TIFF, PDF, SVG, PSD (최대 200MB)</span>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-sm text-gray-600">자동 업로드</span>
+            <button
+              type="button"
+              onClick={() => setAutoUploadEnabled(!autoUploadEnabled)}
+              className={`h-8 px-3 text-sm rounded-md border ${autoUploadEnabled ? 'bg-blue-100 text-blue-600 border-blue-300' : 'bg-white text-gray-700 border-gray-300'}`}
+            >
+              {autoUploadEnabled ? 'ON' : 'OFF'}
+            </button>
+            <span className="text-sm text-gray-600">주기</span>
+            <input type="number" min={2} max={60} value={autoUploadInterval} onChange={(e) => setAutoUploadInterval(Number(e.target.value))} className="w-16 h-8 px-2 border rounded" />
+            {uploadQueue.length > 0 && (
+              <span className="text-xs text-gray-500">대기 {uploadQueue.length}건</span>
+            )}
           </div>
         </div>
       )}

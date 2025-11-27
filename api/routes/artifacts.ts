@@ -4,12 +4,28 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import db from '../database/connection.js';
+import { encryptData, decryptData, encryptionEnabled, encryptWithPassword, decryptWithPassword } from '../utils/crypto.js';
+import rateLimit from 'express-rate-limit';
+import { requireAuth, requireRole } from '../middleware/auth.js';
+import { validateAnnotationsSave, validateProtect, validateUnprotect, validateDeleteImage } from '../middleware/validate.js';
+import { optionalAuth } from '../middleware/auth.js';
 import sharp from 'sharp';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
+
+// Rate limiter for sensitive operations
+const sensitiveLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
+
+// Audit middleware (placeholder for logging sensitive operations)
+const audit = (action: string) => {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.log(`[AUDIT] ${action} - User: ${(req as any).user?.id || 'anonymous'} - IP: ${req.ip}`);
+    next();
+  };
+};
 
 type DbArtifactRow = {
   id: number;
@@ -60,9 +76,9 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB limit for high-res
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const allowedTypes = /jpeg|jpg|png|gif|webp|tiff|tif|pdf|psd|ai|svg/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = allowedTypes.test(file.mimetype);
     
@@ -358,10 +374,10 @@ router.delete('/artifacts/:id', (req, res) => {
 });
 
 // 이미지 업로드
-router.post('/artifacts/:id/images', upload.single('image'), (req: express.Request, res: express.Response) => {
+router.post('/artifacts/:id/images', upload.single('image'), async (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
-    const file = (req as { file?: { filename: string } }).file;
+    const file = (req as { file?: { filename: string; mimetype?: string; size?: number } }).file;
 
     if (!file) {
       return res.status(400).json({
@@ -380,8 +396,168 @@ router.post('/artifacts/:id/images', upload.single('image'), (req: express.Reque
       });
     }
 
-    // multer가 이미 파일을 저장했으므로 파일 경로만 생성
-    const filePath = `/uploads/artifacts/${file.filename}`;
+    const uploadDir = path.join(__dirname, '../../uploads/artifacts');
+    const absOriginal = path.join(uploadDir, file.filename);
+    let filePath = `/uploads/artifacts/${file.filename}`;
+
+    // MIME 시그니처 검사(간이)
+    try {
+      const fd = fs.openSync(absOriginal, 'r')
+      const buf = Buffer.alloc(16)
+      fs.readSync(fd, buf, 0, 16, 0)
+      fs.closeSync(fd)
+      const sigHex = buf.toString('hex')
+      const isPngSig = sigHex.startsWith('89504e47')
+      const isJpegSig = buf[0] === 0xff && buf[1] === 0xd8
+      const isGifSig = buf.slice(0,3).toString('ascii') === 'GIF'
+      const isTiffSig = (buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0x00) || (buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0x00 && buf[3] === 0x2a)
+      const isPdfSig = buf.slice(0,4).toString('ascii') === '%PDF'
+      const claimed = (file.mimetype || '').toLowerCase()
+      const ok = (
+        (claimed.includes('png') && isPngSig) ||
+        (claimed.includes('jpeg') && isJpegSig) ||
+        (claimed.includes('jpg') && isJpegSig) ||
+        (claimed.includes('gif') && isGifSig) ||
+        (claimed.includes('tiff') && isTiffSig) ||
+        (claimed.includes('pdf') && isPdfSig) ||
+        claimed.includes('webp') // webp 간이 생략
+      )
+      if (!ok) {
+        try { fs.unlinkSync(absOriginal) } catch {}
+        return res.status(400).json({ success: false, error: '파일 시그니처 불일치' })
+      }
+    } catch {}
+
+    const meta = await sharp(absOriginal, { limitInputPixels: false }).metadata();
+    const isTiff = (file.mimetype && file.mimetype.toLowerCase() === 'image/tiff') || /\.(tiff|tif)$/i.test(file.filename);
+    const isPdf = (file.mimetype && file.mimetype.toLowerCase() === 'application/pdf') || /\.(pdf)$/i.test(file.filename);
+    const isPsd = /\.(psd)$/i.test(file.filename);
+    const isSvg = (file.mimetype && file.mimetype.toLowerCase() === 'image/svg+xml') || /\.(svg)$/i.test(file.filename);
+    const isAi = /\.(ai)$/i.test(file.filename);
+    const baseName = path.parse(file.filename).name;
+    const nowTag = Date.now();
+
+    // Always record original image
+    try {
+      const stats = fs.statSync(absOriginal);
+      db.prepare(`INSERT INTO images (artifact_id, file_path, file_name, file_size, mime_type, is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
+        id,
+        `/uploads/artifacts/${file.filename}`,
+        file.filename,
+        stats.size,
+        file.mimetype || (isTiff ? 'image/tiff' : 'image/*'),
+        1
+      );
+    } catch {}
+
+    // Preserve layer info for PSD/TIFF into annotation_data on original row
+    try {
+      const originalRow = db.prepare('SELECT id FROM images WHERE artifact_id = ? AND file_name = ? AND is_primary = 1').get(id, file.filename) as { id?: number } | undefined;
+      if (originalRow?.id) {
+        let layerPayload: unknown = null;
+        if (isPsd) {
+          try {
+            const PSD = await import('psd');
+            const psd = await (PSD as any).fromFile(absOriginal);
+            await psd.parse();
+            const tree = psd.tree();
+            const nodes = tree.descendants();
+            const layers = nodes
+              .filter((n: any) => n.isLayer())
+              .map((n: any, idx: number) => ({
+                id: `layer-${idx + 1}`,
+                name: String(n.get('name') || `Layer ${idx + 1}`),
+                visible: n.get('visible') !== false,
+                objects: [],
+              }));
+            layerPayload = { version: '2.0', layers, imageRotation: 0 };
+          } catch {}
+        } else if (isTiff) {
+          const pages = (meta.pages as number) || 1;
+          const layers = Array.from({ length: pages }).map((_, i) => ({
+            id: `layer-${i + 1}`,
+            name: `Page ${i + 1}`,
+            visible: true,
+            objects: [],
+          }));
+          layerPayload = { version: '2.0', layers, imageRotation: 0 };
+        }
+        if (layerPayload) {
+          db.prepare('UPDATE images SET annotation_data = ? WHERE id = ?').run(JSON.stringify(layerPayload), originalRow.id);
+        }
+      }
+    } catch {}
+
+    const needsPreview = (meta.width && meta.width > 4000) || (meta.height && meta.height > 4000) || (file.size && file.size > 20 * 1024 * 1024) || isTiff || isPdf || isPsd || isSvg || isAi;
+    const previewName = `preview-${baseName}-${nowTag}.png`;
+    const absPreview = path.join(uploadDir, previewName);
+    const thumbName = `thumb-${baseName}-${nowTag}.jpg`;
+    const absThumb = path.join(uploadDir, thumbName);
+
+    if (needsPreview) {
+      if (isPdf) {
+        await sharp(absOriginal, { limitInputPixels: false, density: 300 })
+          .png()
+          .toFile(absPreview);
+      } else if (isPsd) {
+        try {
+          const PSD = await import('psd');
+          const psd = await (PSD as any).fromFile(absOriginal);
+          await psd.parse();
+          const png = psd.image.toPng();
+          await new Promise<void>((resolve, reject) => {
+            const out = fs.createWriteStream(absPreview);
+            png.pack().pipe(out);
+            out.on('finish', () => resolve());
+            out.on('error', reject);
+          });
+        } catch (e) {
+          await sharp(absOriginal, { limitInputPixels: false })
+            .png()
+            .toFile(absPreview);
+        }
+      } else if (isSvg) {
+        await sharp(absOriginal, { limitInputPixels: false })
+          .png()
+          .toFile(absPreview);
+      } else if (isAi) {
+        try {
+          await sharp(absOriginal, { limitInputPixels: false, density: 300 })
+            .png()
+            .toFile(absPreview);
+        } catch (e) {
+          // fallback: try to rename preview to original if conversion fails
+          fs.copyFileSync(absOriginal, absPreview);
+        }
+      } else {
+        await sharp(absOriginal, { limitInputPixels: false })
+          .resize({ width: 3000, height: 3000, fit: 'inside', withoutEnlargement: true })
+          .png()
+          .toFile(absPreview);
+      }
+      filePath = `/uploads/artifacts/${previewName}`;
+      try {
+        const stats = fs.statSync(absPreview);
+        db.prepare(`INSERT INTO images (artifact_id, file_path, file_name, file_size, mime_type, is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(id, filePath, previewName, stats.size, 'image/png', 0);
+      } catch {}
+    }
+
+    // Always generate thumbnail for quick listing
+    try {
+      await sharp(absOriginal, { limitInputPixels: false })
+        .resize({ width: 512, height: 512, fit: 'cover' })
+        .jpeg({ quality: 85 })
+        .toFile(absThumb);
+      const thumbRel = `/uploads/artifacts/${thumbName}`;
+      db.prepare(`INSERT INTO images (artifact_id, file_path, file_name, file_size, mime_type, is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
+        id,
+        thumbRel,
+        thumbName,
+        fs.statSync(absThumb).size,
+        'image/jpeg',
+        0
+      );
+    } catch {}
 
     // 기존 이미지 가져오기
     const currentArtifact = db.prepare('SELECT images FROM artifacts WHERE id = ?').get(id) as { images: string } | undefined;
@@ -412,7 +588,7 @@ router.post('/artifacts/:id/images', upload.single('image'), (req: express.Reque
       success: true,
       data: {
         file_path: filePath,
-        file_name: file.filename
+        file_name: path.basename(filePath)
       }
     });
   } catch (error) {
@@ -444,7 +620,8 @@ router.get('/artifacts/:id/annotations', (req, res) => {
     let canvasJson: unknown | null = null;
     if (row?.annotation_data) {
       try {
-        const parsed = JSON.parse(row.annotation_data);
+        const raw = JSON.parse(row.annotation_data);
+        const parsed = raw && (raw as any).enc === 'aes-256-gcm' ? JSON.parse(decryptData(raw as any)) : raw;
         // 새 형식 (version 2.0 with layers)
         if (parsed && typeof parsed === 'object' && parsed.version === '2.0' && parsed.layers) {
           canvasJson = parsed;
@@ -472,7 +649,8 @@ router.get('/artifacts/:id/annotations', (req, res) => {
 });
 
 // 이미지 어노테이션 저장(업서트)
-router.post('/artifacts/:id/annotations', (req: express.Request, res: express.Response) => {
+// 개발 환경에서는 인증 없이 허용
+router.post('/artifacts/:id/annotations', sensitiveLimiter, optionalAuth, validateAnnotationsSave, (req: express.Request, res: express.Response) => {
   try {
     const { id } = req.params;
     const { image_path, annotations } = req.body as { image_path?: string; annotations?: unknown };
@@ -483,18 +661,232 @@ router.post('/artifacts/:id/annotations', (req: express.Request, res: express.Re
 
     const existing = db.prepare('SELECT id FROM images WHERE artifact_id = ? AND file_path = ?').get(id, image_path) as { id?: number } | undefined;
     const annotationJson = typeof annotations === 'string' ? annotations : JSON.stringify(annotations);
+    const toStore = encryptionEnabled() ? JSON.stringify(encryptData(annotationJson)) : annotationJson;
 
     if (existing?.id) {
-      db.prepare('UPDATE images SET annotation_data = ?, created_at = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE id = ?').run(annotationJson, existing.id);
+      db.prepare('UPDATE images SET annotation_data = ?, created_at = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE id = ?').run(toStore, existing.id);
     } else {
       const file_name = image_path.split('/').pop() || image_path;
-      db.prepare(`INSERT INTO images (artifact_id, file_path, file_name, annotation_data, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(id, image_path, file_name, annotationJson);
+      db.prepare(`INSERT INTO images (artifact_id, file_path, file_name, annotation_data, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(id, image_path, file_name, toStore);
     }
 
     return res.json({ success: true, data: { image_path } });
   } catch (error) {
     console.error('어노테이션 저장 오류:', error);
     return res.status(500).json({ success: false, error: '어노테이션 저장 실패' });
+  }
+});
+
+router.post('/artifacts/:id/images/export', async (req: express.Request, res: express.Response) => {
+  try {
+    const { id } = req.params;
+    const { image_path, format, quality } = req.body as { image_path?: string; format?: string; quality?: number };
+    if (!image_path || !format) {
+      return res.status(400).json({ success: false, error: 'image_path와 format이 필요합니다.' });
+    }
+    const allowed = ['png', 'jpg', 'jpeg', 'webp', 'tiff'];
+    const fmt = format.toLowerCase();
+    if (!allowed.includes(fmt)) {
+      return res.status(400).json({ success: false, error: '지원하지 않는 형식입니다.' });
+    }
+    const uploadRoot = path.join(__dirname, '../../');
+    const absInput = path.join(uploadRoot, image_path.startsWith('/') ? image_path.slice(1) : image_path);
+    if (!fs.existsSync(absInput)) {
+      return res.status(404).json({ success: false, error: '원본 이미지를 찾을 수 없습니다.' });
+    }
+    const outName = `export-${Date.now()}.${fmt === 'jpeg' ? 'jpg' : fmt}`;
+    const absOut = path.join(uploadRoot, 'uploads', 'artifacts', outName);
+    let pipeline = sharp(absInput, { limitInputPixels: false });
+    const q = typeof quality === 'number' ? quality : 90;
+    if (fmt === 'png') {
+      pipeline = pipeline.png();
+    } else if (fmt === 'jpg' || fmt === 'jpeg') {
+      pipeline = pipeline.jpeg({ quality: q });
+    } else if (fmt === 'webp') {
+      pipeline = pipeline.webp({ quality: q });
+    } else if (fmt === 'tiff') {
+      pipeline = pipeline.tiff({ compression: 'lzw', xres: 300, yres: 300 });
+    }
+    await pipeline.toFile(absOut);
+    const relOut = `/uploads/artifacts/${outName}`;
+    try {
+      const stats = fs.statSync(absOut);
+      db.prepare(`INSERT INTO images (artifact_id, file_path, file_name, file_size, mime_type, is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(id, relOut, outName, stats.size, fmt === 'jpg' ? 'image/jpeg' : `image/${fmt}`, 0);
+    } catch {}
+    return res.json({ success: true, data: { file_path: relOut, format: fmt } });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: '이미지 내보내기 실패' });
+  }
+});
+
+router.post('/artifacts/:id/annotations/export-svg', async (req: express.Request, res: express.Response) => {
+  try {
+    const { id } = req.params;
+    const { svg, name } = req.body as { svg?: string; name?: string };
+    if (!svg) {
+      return res.status(400).json({ success: false, error: 'svg 데이터가 필요합니다.' });
+    }
+    const safeName = (name && String(name).replace(/[^a-zA-Z0-9-_]/g, '')) || `annotations-${Date.now()}`;
+    const outName = `${safeName}.svg`;
+    const outPath = path.join(__dirname, '../../uploads/artifacts', outName);
+    fs.writeFileSync(outPath, svg);
+    const rel = `/uploads/artifacts/${outName}`;
+    try {
+      const stats = fs.statSync(outPath);
+      db.prepare(`INSERT INTO images (artifact_id, file_path, file_name, file_size, mime_type, is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
+        id,
+        rel,
+        outName,
+        stats.size,
+        'image/svg+xml',
+        0
+      );
+    } catch {}
+    return res.json({ success: true, data: { file_path: rel } });
+  } catch {
+    return res.status(500).json({ success: false, error: 'SVG 내보내기 실패' });
+  }
+});
+
+// 파일 암호 보호 내보내기
+router.post('/artifacts/:id/protect', sensitiveLimiter, requireAuth, requireRole(['editor','admin']), audit('files.protect'), validateProtect, (req: express.Request, res: express.Response) => {
+  try {
+    const { id } = req.params;
+    const { file_path, password } = req.body as { file_path?: string; password?: string };
+    if (!file_path || !password) {
+      return res.status(400).json({ success: false, error: 'file_path와 password가 필요합니다.' });
+    }
+    const uploadRoot = path.join(__dirname, '../../');
+    const absInput = path.join(uploadRoot, file_path.startsWith('/') ? file_path.slice(1) : file_path);
+    if (!fs.existsSync(absInput)) {
+      return res.status(404).json({ success: false, error: '원본 파일을 찾을 수 없습니다.' });
+    }
+    const data = fs.readFileSync(absInput);
+    const payload = encryptWithPassword(data.toString('base64'), password);
+    const meta = { original_ext: path.extname(absInput), crc32: require('crypto').createHash('md5').update(data).digest('hex'), created_at: new Date().toISOString() }
+    const wrapped = { meta, payload }
+    const outName = `protected-${Date.now()}.enc.json`;
+    const absOut = path.join(uploadRoot, 'uploads', 'artifacts', outName);
+    fs.writeFileSync(absOut, JSON.stringify(wrapped));
+    const rel = `/uploads/artifacts/${outName}`;
+    db.prepare(`INSERT INTO images (artifact_id, file_path, file_name, file_size, mime_type, is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(id, rel, outName, Buffer.byteLength(JSON.stringify(wrapped), 'utf8'), 'application/json', 0);
+    return res.json({ success: true, data: { file_path: rel } });
+  } catch {
+    return res.status(500).json({ success: false, error: '파일 암호 보호 실패' });
+  }
+});
+
+// 파일 암호 보호 복구
+router.post('/artifacts/:id/unprotect', sensitiveLimiter, requireAuth, requireRole(['editor','admin']), audit('files.unprotect'), validateUnprotect, (req: express.Request, res: express.Response) => {
+  try {
+    const { file_path, password } = req.body as { file_path?: string; password?: string };
+    if (!file_path || !password) {
+      return res.status(400).json({ success: false, error: 'file_path와 password가 필요합니다.' });
+    }
+    const uploadRoot = path.join(__dirname, '../../');
+    const absInput = path.join(uploadRoot, file_path.startsWith('/') ? file_path.slice(1) : file_path);
+    if (!fs.existsSync(absInput)) {
+      return res.status(404).json({ success: false, error: '암호 파일을 찾을 수 없습니다.' });
+    }
+    const wrapped = JSON.parse(fs.readFileSync(absInput, 'utf8'));
+    const base64 = decryptWithPassword(wrapped.payload, password);
+    const buf = Buffer.from(base64, 'base64');
+    const outName = `restored-${Date.now()}${wrapped.meta?.original_ext || ''}`;
+    const absOut = path.join(uploadRoot, 'uploads', 'artifacts', outName);
+    fs.writeFileSync(absOut, buf);
+    const rel = `/uploads/artifacts/${outName}`;
+    return res.json({ success: true, data: { file_path: rel } });
+  } catch {
+    return res.status(500).json({ success: false, error: '파일 복호화 실패' });
+  }
+});
+
+router.post('/artifacts/:id/preservation-card/export', async (req: express.Request, res: express.Response) => {
+  try {
+    const { id } = req.params;
+    const { html, name } = req.body as { html?: string; name?: string };
+    if (!html) {
+      return res.status(400).json({ success: false, error: 'html 데이터가 필요합니다.' });
+    }
+    const safeName = (name && String(name).replace(/[^a-zA-Z0-9-_]/g, '')) || `preservation-card-${Date.now()}`;
+    const outName = `${safeName}.html`;
+    const outPath = path.join(__dirname, '../../uploads/artifacts', outName);
+    fs.writeFileSync(outPath, html);
+    const rel = `/uploads/artifacts/${outName}`;
+    try {
+      const stats = fs.statSync(outPath);
+      db.prepare(`INSERT INTO images (artifact_id, file_path, file_name, file_size, mime_type, is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
+        id,
+        rel,
+        outName,
+        stats.size,
+        'text/html',
+        0
+      );
+    } catch {}
+    return res.json({ success: true, data: { file_path: rel } });
+  } catch {
+    return res.status(500).json({ success: false, error: '보존처리카드 내보내기 실패' });
+  }
+});
+
+router.post('/artifacts/:id/timelapse/frame', async (req: express.Request, res: express.Response) => {
+  try {
+    const { id } = req.params;
+    const { data_url, timeline_id, step_index, annotations } = req.body as { data_url?: string; timeline_id?: string; step_index?: number; annotations?: unknown };
+    if (!data_url || !timeline_id) {
+      return res.status(400).json({ success: false, error: 'data_url과 timeline_id가 필요합니다.' });
+    }
+    const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(data_url);
+    if (!m) {
+      return res.status(400).json({ success: false, error: '잘못된 데이터 URL' });
+    }
+    const fmt = m[1];
+    const b64 = m[2];
+    const buf = Buffer.from(b64, 'base64');
+    const name = `timelapse-${timeline_id}-${String(step_index ?? Date.now())}.${fmt === 'jpeg' ? 'jpg' : fmt}`;
+    const absOut = path.join(__dirname, '../../uploads/artifacts', name);
+    fs.writeFileSync(absOut, buf);
+    const rel = `/uploads/artifacts/${name}`;
+    try {
+      db.prepare(`INSERT INTO images (artifact_id, file_path, file_name, file_size, mime_type, is_primary, annotation_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).run(
+        id,
+        rel,
+        name,
+        buf.length,
+        fmt === 'jpeg' ? 'image/jpeg' : `image/${fmt}`,
+        0,
+        JSON.stringify({ timeline_id, step_index: step_index ?? null, annotations: annotations ?? null })
+      );
+    } catch {}
+    return res.json({ success: true, data: { file_path: rel, timeline_id, step_index } });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: '타임랩스 프레임 저장 실패' });
+  }
+});
+
+router.get('/artifacts/:id/timelapse/:timelineId', (req: express.Request, res: express.Response) => {
+  try {
+    const { id, timelineId } = req.params as { id: string; timelineId: string };
+    const rows = db.prepare(`SELECT file_path, file_name, annotation_data, created_at FROM images WHERE artifact_id = ? AND annotation_data IS NOT NULL`).all(id) as Array<{ file_path: string; file_name: string; annotation_data: string; created_at: string }>;
+    const frames = rows
+      .map((r) => {
+        try {
+          const meta = JSON.parse(r.annotation_data || '{}');
+          return { file_path: r.file_path, file_name: r.file_name, created_at: r.created_at, timeline_id: meta.timeline_id, step_index: meta.step_index };
+        } catch {
+          return null as any;
+        }
+      })
+      .filter((x) => x && x.timeline_id === timelineId)
+      .sort((a, b) => {
+        const ai = typeof a.step_index === 'number' ? a.step_index : 0;
+        const bi = typeof b.step_index === 'number' ? b.step_index : 0;
+        return ai - bi;
+      });
+    return res.json({ success: true, data: frames });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: '타임랩스 프레임 조회 실패' });
   }
 });
 
@@ -856,3 +1248,32 @@ router.delete('/notes/:noteId', (req: express.Request, res: express.Response) =>
 });
 
 export default router;
+// 이미지 삭제
+router.delete('/artifacts/:id/images', sensitiveLimiter, requireAuth, requireRole(['editor','admin']), validateDeleteImage, (req: express.Request, res: express.Response) => {
+  try {
+    const { id } = req.params;
+    const { image_path } = req.body as { image_path?: string };
+    if (!image_path) {
+      return res.status(400).json({ success: false, error: 'image_path가 필요합니다.' });
+    }
+    const uploadsBase = path.join(__dirname, '../../uploads');
+    const abs = path.join(uploadsBase, image_path.startsWith('/') ? image_path.slice(1) : image_path);
+    if (fs.existsSync(abs)) {
+      try { fs.unlinkSync(abs); } catch {}
+    }
+    // images 테이블에서 레코드 제거
+    db.prepare('DELETE FROM images WHERE artifact_id = ? AND file_path = ?').run(id, image_path);
+    // artifacts.images 목록 업데이트
+    const art = db.prepare('SELECT images FROM artifacts WHERE id = ?').get(id) as { images?: string } | undefined;
+    let list: string[] = [];
+    if (art?.images) {
+      try { list = JSON.parse(art.images) as string[]; } catch { list = []; }
+    }
+    const updated = list.filter((p) => p !== image_path);
+    db.prepare('UPDATE artifacts SET images = ? WHERE id = ?').run(JSON.stringify(updated), id);
+    return res.json({ success: true, data: { removed: true } });
+  } catch (error) {
+    console.error('이미지 삭제 오류:', error);
+    return res.status(500).json({ success: false, error: '이미지 삭제 실패' });
+  }
+});
