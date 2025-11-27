@@ -218,7 +218,7 @@ const ArtifactDetail: React.FC = () => {
 
   // 이미지 다운로드
   const handleDownloadImage = (imagePath: string) => {
-    const url = imagePath.startsWith('http') ? imagePath : `${window.location.origin}${imagePath}`;
+    const url = imagePath.startsWith('http') ? imagePath : imagePath;
     const link = document.createElement('a');
     link.href = url;
     link.download = imagePath.split('/').pop() || 'image';
@@ -788,7 +788,7 @@ const ArtifactDetail: React.FC = () => {
                 {artifact.images.map((img, idx) => (
                   <div key={idx} className="group relative aspect-square">
                     <img
-                      src={`${window.location.origin}${img}`}
+                      src={img}
                       alt={`${artifact.name} 이미지 ${idx + 1}`}
                       className="w-full h-full object-cover rounded-lg border border-gray-200"
                       crossOrigin="anonymous"

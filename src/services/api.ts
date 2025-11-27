@@ -8,7 +8,9 @@ export const getImageUrl = (imagePath: string): string => {
   }
   // 상대 경로인 경우 현재 origin 기준으로 절대 경로 생성
   const baseUrl = window.location.origin;
-  return `${baseUrl}${imagePath}`;
+  // 경로 중복 방지
+  const cleanPath = imagePath.startsWith('/') ? imagePath : `/${imagePath}`;
+  return `${baseUrl}${cleanPath}`;
 };
 
 export interface Artifact {
