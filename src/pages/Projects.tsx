@@ -11,7 +11,7 @@ import {
   XMarkIcon
 } from '@heroicons/react/24/outline';
 import { useArtifactStore, type Artifact } from '../stores/artifactStore';
-import { artifactApi } from '../services/api';
+import { artifactApi, getImageUrl } from '../services/api';
 
 interface Project {
   id: string;
@@ -540,7 +540,7 @@ const Projects: React.FC = () => {
                         <div className="aspect-w-1 aspect-h-1 bg-gray-100">
                           {artifact.images && artifact.images.length > 0 ? (
                             <img
-                              src={artifact.images[0]}
+                              src={getImageUrl(artifact.images[0])}
                               alt={artifact.name}
                               className="w-full h-48 object-cover"
                               onError={(e) => {

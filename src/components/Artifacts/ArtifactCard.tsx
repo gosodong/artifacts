@@ -2,6 +2,7 @@ import React from 'react';
 import { CalendarIcon, MapPinIcon, UserIcon } from '@heroicons/react/24/outline';
 import { EyeIcon, TrashIcon } from '@heroicons/react/24/solid';
 import { useLongPress, useTabletGestures } from '../../hooks/useTouchGestures';
+import { getImageUrl } from '../../services/api';
 
 interface Artifact {
   id: string;
@@ -56,7 +57,7 @@ const ArtifactCard: React.FC<ArtifactCardProps> = ({
           <div className="aspect-w-16 aspect-h-9 bg-gray-100">
             {artifact.images.length > 0 ? (
               <img
-                src={artifact.images[0]}
+                src={getImageUrl(artifact.images[0])}
                 alt={artifact.name}
                 className="w-full h-48 object-cover"
                 crossOrigin="anonymous"

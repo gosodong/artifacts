@@ -8,7 +8,7 @@ import {
   ArrowTrendingUpIcon
 } from '@heroicons/react/24/outline';
 import { useArtifactStore } from '../stores/artifactStore';
-import { artifactApi } from '../services/api';
+import { artifactApi, getImageUrl } from '../services/api';
 
 interface StatCardProps {
   title: string;
@@ -17,6 +17,24 @@ interface StatCardProps {
   color: string;
   trend?: number;
 }
+
+// 이미지 로드 실패 시 fallback을 보여주는 컴포넌트 (React 방식으로 처리)
+const ImageWithFallback: React.FC<{ src: string; alt: string }> = ({ src, alt }) => {
+  const [hasError, setHasError] = useState(false);
+  
+  if (hasError) {
+    return <ArchiveBoxIcon className="h-6 w-6 text-gray-400" />;
+  }
+  
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="h-full w-full object-cover rounded-lg"
+      onError={() => setHasError(true)}
+    />
+  );
+};
 
 const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, color, trend }) => {
   return (
@@ -171,20 +189,11 @@ const Dashboard: React.FC = () => {
                 >
                   <div className="flex items-center space-x-4">
                     {appSettings.showThumbnails && (
-                      <div className="h-12 w-12 bg-gray-200 rounded-lg flex items-center justify-center">
+                      <div className="h-12 w-12 bg-gray-200 rounded-lg flex items-center justify-center overflow-hidden">
                         {artifact.images && artifact.images.length > 0 ? (
-                          <img
-                            src={artifact.images[0]}
+                          <ImageWithFallback
+                            src={getImageUrl(artifact.images[0])}
                             alt={artifact.name}
-                            className="h-full w-full object-cover rounded-lg"
-                            onError={(e) => {
-                              console.log(`이미지 로드 실패 - ${artifact.id}:`, artifact.images[0]);
-                              (e.target as HTMLImageElement).style.display = 'none';
-                              const parent = (e.target as HTMLImageElement).parentElement;
-                              if (parent) {
-                                parent.innerHTML = '<svg class=\"h-6 w-6 text-gray-400\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z\" /></svg>';
-                              }
-                            }}
                           />
                         ) : (
                           <ArchiveBoxIcon className="h-6 w-6 text-gray-400" />
