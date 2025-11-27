@@ -74,7 +74,7 @@ const PreservationCardTemplate: React.FC<Props> = ({ artifact, log }) => {
             <h3 style={{ fontSize: 14, margin: '0 0 8px 0' }}>처리 전 이미지</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
               {(log.before_images || []).map((src, i) => (
-                <img key={i} src={`http://localhost:3001${src}`} alt={`before-${i}`} style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb' }} />
+                <img key={i} src={src.startsWith('http') ? src : `${window.location.origin}${src}`} alt={`before-${i}`} style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb' }} />
               ))}
             </div>
           </div>
@@ -82,7 +82,7 @@ const PreservationCardTemplate: React.FC<Props> = ({ artifact, log }) => {
             <h3 style={{ fontSize: 14, margin: '0 0 8px 0' }}>처리 후 이미지</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
               {(log.after_images || []).map((src, i) => (
-                <img key={i} src={`http://localhost:3001${src}`} alt={`after-${i}`} style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb' }} />
+                <img key={i} src={src.startsWith('http') ? src : `${window.location.origin}${src}`} alt={`after-${i}`} style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb' }} />
               ))}
             </div>
           </div>

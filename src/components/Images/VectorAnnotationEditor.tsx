@@ -1288,7 +1288,7 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
     img.onerror = () => setBgError(true);
     let finalUrl = imageUrl;
     if (imageUrl.startsWith('/uploads') || imageUrl.startsWith('/images')) {
-      finalUrl = `http://localhost:3001${imageUrl}`;
+      finalUrl = `${window.location.origin}${imageUrl}`;
     }
     img.src = finalUrl;
 
