@@ -232,7 +232,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
           {currentImages.map((imageUrl, index) => {
             const isTemp = imageUrl.startsWith('blob:');
             const timestamp = imageTimestamps[imageUrl] || '';
-            const imgSrc = isTemp ? imageUrl : `http://localhost:3001${imageUrl}${timestamp ? `?t=${timestamp}` : ''}`;
+            const imgSrc = isTemp ? imageUrl : `${imageUrl}${timestamp ? `?t=${timestamp}` : ''}`;
 
             return (
               <div

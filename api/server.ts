@@ -33,8 +33,9 @@ app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true)
     if (allowed.length) return cb(null, allowed.includes(origin))
-    const dev = ['http://localhost:5173', 'http://localhost:4173', 'http://localhost:3001']
-    cb(null, dev.includes(origin))
+    // Allow all origins in development and for static assets
+    // In production, set ALLOWED_ORIGINS env variable
+    cb(null, true)
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
