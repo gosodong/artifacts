@@ -1229,8 +1229,8 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
     if (passwordProtected && filePassword && artifactId) {
       try {
         const { artifactApi } = await import('../../services/api');
-        // Server will handle encryption
-        await artifactApi.saveProtectedAnnotations?.(artifactId, saveData, filePassword);
+        // Server will handle encryption - use regular save with password in data
+        await artifactApi.saveImageAnnotations(artifactId, imagePath || '', { ...saveData, protected: true, password: filePassword });
       } catch (e) {
         console.error('Protected save failed:', e);
       }
@@ -2509,7 +2509,14 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
                 )}
                 <div className="flex items-center gap-2">
                   <span className="text-gray-500">단위</span>
-                  <input value={measureUnit} onChange={e => setMeasureUnit(e.target.value)} className="flex-1 px-2 py-1 border rounded" />
+                  <select value={measureUnit} onChange={e => setMeasureUnit(e.target.value as typeof measureUnit)} className="flex-1 px-2 py-1 border rounded">
+                    <option value="px">px</option>
+                    <option value="cm">cm</option>
+                    <option value="mm">mm</option>
+                    <option value="in">in</option>
+                    <option value="m">m</option>
+                    <option value="ft">ft</option>
+                  </select>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-gray-500">스케일</span>

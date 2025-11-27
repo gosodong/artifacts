@@ -31,6 +31,10 @@
     "types": [
       "node",
       "express"
+    ],
+    "typeRoots": [
+      "./node_modules/@types",
+      "./api/types"
     ]
   },
   "include": [

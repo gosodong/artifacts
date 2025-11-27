@@ -2,7 +2,7 @@ import {
   PencilIcon,
   PaintBrushIcon,
   ArrowRightIcon,
-  TextIcon,
+  DocumentTextIcon,
   MinusIcon,
   ArrowsUpDownIcon,
   ArrowPathIcon,
@@ -130,7 +130,7 @@ export const defaultToolGroups: ToolGroup[] = [
       {
         id: 'text',
         name: 'Text',
-        icon: TextIcon,
+        icon: DocumentTextIcon,
         action: () => console.log('Text tool selected'),
         shortcut: 'T',
         visible: true
