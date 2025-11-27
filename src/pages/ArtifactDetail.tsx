@@ -218,7 +218,7 @@ const ArtifactDetail: React.FC = () => {
 
   // 이미지 다운로드
   const handleDownloadImage = (imagePath: string) => {
-    const url = `http://localhost:3001${imagePath}`;
+    const url = imagePath;
     const link = document.createElement('a');
     link.href = url;
     link.download = imagePath.split('/').pop() || 'image';
@@ -788,7 +788,7 @@ const ArtifactDetail: React.FC = () => {
                 {artifact.images.map((img, idx) => (
                   <div key={idx} className="group relative aspect-square">
                     <img
-                      src={`http://localhost:3001${img}`}
+                      src={img}
                       alt={`${artifact.name} 이미지 ${idx + 1}`}
                       className="w-full h-full object-cover rounded-lg border border-gray-200"
                       crossOrigin="anonymous"
@@ -796,7 +796,7 @@ const ArtifactDetail: React.FC = () => {
                     {/* 호버 시 액션 버튼 */}
                     <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all rounded-lg flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 print:hidden">
                       <button
-                        onClick={() => window.open(`http://localhost:3001${img}`, '_blank')}
+                        onClick={() => window.open(`${img}`, '_blank')}
                         className="p-2 bg-white rounded-full hover:bg-gray-100 shadow-lg"
                         title="보기"
                       >
@@ -948,7 +948,7 @@ const ArtifactDetail: React.FC = () => {
       {/* 이미지 편집 모달 */}
       {showEditor && selectedImage && artifact && (
         <VectorAnnotationEditor
-          imageUrl={`http://localhost:3001${selectedImage}?t=${Date.now()}`}
+          imageUrl={`${selectedImage}?t=${Date.now()}`}
           imageName={selectedImage.split('/').pop() || '이미지'}
           imagePath={selectedImage}
           artifactId={artifact.id}

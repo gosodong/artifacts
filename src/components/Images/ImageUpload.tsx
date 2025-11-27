@@ -316,7 +316,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
       {/* 이미지 편집 모달 */}
       {showEditor && editingImage && (
         <VectorAnnotationEditor
-          imageUrl={`http://localhost:3001${editingImage}?t=${Date.now()}`}
+          imageUrl={`${editingImage}?t=${Date.now()}`}
           imageName={editingImage.split('/').pop() || '이미지'}
           imagePath={editingImage}
           artifactId={artifactId}

@@ -339,7 +339,7 @@ const Images: React.FC = () => {
       {/* Annotation Editor Modal */}
       {showAnnotationEditor && selectedImage && (
         <VectorAnnotationEditor
-          imageUrl={`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}${selectedImage.filePath}?t=${Date.now()}`}
+          imageUrl={`${selectedImage.filePath}?t=${Date.now()}`}
           imageName={selectedImage.fileName}
           imagePath={selectedImage.filePath}
           artifactId={selectedImage.artifactId}

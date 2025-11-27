@@ -540,7 +540,7 @@ const Projects: React.FC = () => {
                         <div className="aspect-w-1 aspect-h-1 bg-gray-100">
                           {artifact.images && artifact.images.length > 0 ? (
                             <img
-                              src={`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}${artifact.images[0]}`}
+                              src={artifact.images[0]}
                               alt={artifact.name}
                               className="w-full h-48 object-cover"
                               onError={(e) => {
