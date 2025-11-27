@@ -46,24 +46,26 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Static files with proper headers
 app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
-  setHeaders: (res, path) => {
+  setHeaders: (res, filePath) => {
     // 이미지 파일에 대한 CORS 헤더 설정
-    if (path.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) {
+    if (filePath.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) {
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
     }
   }
 }));
 
 // /images 경로도 /uploads로 리다이렉트 (하위 호환성)
 app.use('/images', express.static(path.join(__dirname, '../uploads'), {
-  setHeaders: (res, path) => {
+  setHeaders: (res, filePath) => {
     // 이미지 파일에 대한 CORS 헤더 설정
-    if (path.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) {
+    if (filePath.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) {
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
     }
   }
 }));
@@ -119,8 +121,24 @@ app.get('/api/health', (req, res) => {
 // Serve frontend build (SPA) if available
 const clientDistPath = path.join(__dirname, '../dist');
 if (fs.existsSync(clientDistPath)) {
-  app.use(express.static(clientDistPath));
+  app.use(express.static(clientDistPath, {
+    setHeaders: (res, filePath) => {
+      // HTML 파일은 캐시하지 않음 (항상 최신 버전 로드)
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      }
+      // JS, CSS 파일은 장기 캐시 (파일명에 해시가 포함됨)
+      else if (filePath.match(/\.(js|css)$/i)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    }
+  }));
   app.get(/^\/(?!api).*/, (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(path.join(clientDistPath, 'index.html'));
   });
 }
