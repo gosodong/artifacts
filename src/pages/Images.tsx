@@ -99,12 +99,12 @@ const Images: React.FC = () => {
   });
 
   const handleViewImage = (imagePath: string) => {
-    const fullImageUrl = imagePath.startsWith('http') ? imagePath : `http://localhost:3001${imagePath}?t=${Date.now()}`;
+    const fullImageUrl = imagePath.startsWith('http') ? imagePath : `${imagePath}?t=${Date.now()}`;
     window.open(fullImageUrl, '_blank');
   };
 
   const handleDownloadImage = (imagePath: string, fileName: string) => {
-    const fullImageUrl = imagePath.startsWith('http') ? imagePath : `http://localhost:3001${imagePath}`;
+    const fullImageUrl = imagePath.startsWith('http') ? imagePath : `${imagePath}`;
     const link = document.createElement('a');
     link.href = fullImageUrl;
     link.download = fileName;
@@ -261,7 +261,7 @@ const Images: React.FC = () => {
                     {showThumbnails && (
                       <div className="aspect-w-1 aspect-h-1 bg-gray-100 relative group">
                         <img
-                    src={`http://localhost:3001${image.filePath}${imageTimestamps[image.id] ? `?t=${imageTimestamps[image.id]}` : ''}`}
+                    src={`${image.filePath}${imageTimestamps[image.id] ? `?t=${imageTimestamps[image.id]}` : ''}`}
                           alt={image.artifactName}
                           className="w-full h-48 object-cover cursor-pointer group-hover:opacity-90 transition-all duration-300"
                           onClick={() => handleViewImage(image.filePath)}

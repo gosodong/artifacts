@@ -43,6 +43,13 @@ type NoteRow = {
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadPath = path.join(__dirname, '../../uploads/artifacts');
+    try {
+      if (!fs.existsSync(uploadPath)) {
+        fs.mkdirSync(uploadPath, { recursive: true });
+      }
+    } catch (err) {
+      return cb(err as Error, uploadPath);
+    }
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {

@@ -137,12 +137,12 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
   const handleViewImage = (imageUrl: string) => {
     const fullUrl = imageUrl.startsWith('http') || imageUrl.startsWith('blob:')
       ? imageUrl
-      : `http://localhost:3001${imageUrl}`;
+      : imageUrl;
     window.open(fullUrl, '_blank');
   };
 
   const handleDownloadImage = (imageUrl: string) => {
-    const fullUrl = imageUrl.startsWith('http') ? imageUrl : `http://localhost:3001${imageUrl}`;
+    const fullUrl = imageUrl.startsWith('http') ? imageUrl : imageUrl;
     const link = document.createElement('a');
     link.href = fullUrl;
     link.download = imageUrl.split('/').pop() || 'image';

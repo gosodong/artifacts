@@ -174,7 +174,7 @@ const Dashboard: React.FC = () => {
                       <div className="h-12 w-12 bg-gray-200 rounded-lg flex items-center justify-center">
                         {artifact.images && artifact.images.length > 0 ? (
                           <img
-                            src={`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}${artifact.images[0]}`}
+                            src={artifact.images[0]}
                             alt={artifact.name}
                             className="h-full w-full object-cover rounded-lg"
                             onError={(e) => {
