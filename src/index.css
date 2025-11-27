@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  line-height: 1.5;
+  font-weight: 400;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 인쇄용 스타일 */
+@media print {
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+
+  body {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* 페이지 나눔 방지 */
+  .print-no-break {
+    page-break-inside: avoid;
+  }
+
+  /* 보고서 헤더 배경색 유지 */
+  .bg-gradient-to-r {
+    background: #b45309 !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+
+  /* 보존그룹 배경색 유지 */
+  .bg-blue-50, .bg-green-50, .bg-purple-50 {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* 이미지 그리드 인쇄 최적화 */
+  .grid img {
+    max-height: 150px;
+    object-fit: cover;
+  }
+}
