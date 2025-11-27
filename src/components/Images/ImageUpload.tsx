@@ -6,7 +6,7 @@ import {
   EyeIcon,
   ArrowDownTrayIcon,
 } from '@heroicons/react/24/outline';
-import { artifactApi } from '../../services/api';
+import { artifactApi, getImageUrl } from '../../services/api';
 import { toast } from 'sonner';
 import VectorAnnotationEditor from './VectorAnnotationEditor';
 
@@ -232,7 +232,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
           {currentImages.map((imageUrl, index) => {
             const isTemp = imageUrl.startsWith('blob:');
             const timestamp = imageTimestamps[imageUrl] || '';
-            const imgSrc = isTemp ? imageUrl : `${imageUrl}${timestamp ? `?t=${timestamp}` : ''}`;
+            const imgSrc = isTemp ? imageUrl : getImageUrl(`${imageUrl}${timestamp ? `?t=${timestamp}` : ''}`);
 
             return (
               <div

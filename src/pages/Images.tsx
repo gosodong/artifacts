@@ -99,12 +99,12 @@ const Images: React.FC = () => {
   });
 
   const handleViewImage = (imagePath: string) => {
-    const fullImageUrl = imagePath.startsWith('http') ? imagePath : `${imagePath}?t=${Date.now()}`;
+    const fullImageUrl = imagePath.startsWith('http') ? imagePath : `${window.location.origin}${imagePath}?t=${Date.now()}`;
     window.open(fullImageUrl, '_blank');
   };
 
   const handleDownloadImage = (imagePath: string, fileName: string) => {
-    const fullImageUrl = imagePath.startsWith('http') ? imagePath : `${imagePath}`;
+    const fullImageUrl = imagePath.startsWith('http') ? imagePath : `${window.location.origin}${imagePath}`;
     const link = document.createElement('a');
     link.href = fullImageUrl;
     link.download = fileName;

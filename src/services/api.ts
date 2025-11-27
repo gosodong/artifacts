@@ -1,5 +1,16 @@
 const API_BASE_URL = (import.meta.env.VITE_API_URL ?? '/api');
 
+// 이미지 URL을 절대 경로로 변환
+export const getImageUrl = (imagePath: string): string => {
+  if (!imagePath) return '';
+  if (imagePath.startsWith('http://') || imagePath.startsWith('https://') || imagePath.startsWith('blob:')) {
+    return imagePath;
+  }
+  // 상대 경로인 경우 현재 origin 기준으로 절대 경로 생성
+  const baseUrl = window.location.origin;
+  return `${baseUrl}${imagePath}`;
+};
+
 export interface Artifact {
   id: string;
   name: string;
