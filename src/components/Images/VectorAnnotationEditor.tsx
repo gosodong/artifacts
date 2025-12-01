@@ -49,7 +49,7 @@ interface VectorAnnotationEditorProps {
 // ============ Constants ============
 const COLORS = ['#000000', '#1e3a8a', '#EF4444', '#F59E0B', '#10B981', '#6366F1', '#F472B6', '#8B5CF6', '#06B6D4', '#ffffff'];
 const BRUSH_TYPES: { id: BrushType; name: string; icon: string }[] = [
-  { id: 'pencil', name: '연필', icon: '✏️' },
+  { id: 'pencil', name: '연1필', icon: '✏️' },
   { id: 'marker', name: '마커', icon: '🖊️' },
   { id: 'highlighter', name: '형광펜', icon: '🖍️' },
   { id: 'watercolor', name: '수채화', icon: '🎨' },
