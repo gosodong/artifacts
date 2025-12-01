@@ -342,6 +342,8 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
   // ============ Render Layers to Canvas (Optimized) ============
   const isDrawingModeRef = useRef(false);
   const needsRenderRef = useRef(false);
+  const isPanningRef = useRef(false);
+  const panLastRef = useRef<{x:number;y:number}|null>(null);
   
   const renderLayersToCanvas = useCallback(async () => {
     const canvas = fabricCanvasRef.current;
@@ -995,6 +997,7 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
       });
     }
     
+    ;(text as any).objectId = `obj-${Date.now()}`;
     // 캔버스에 직접 추가하고 레이어 데이터도 업데이트
     canvas.add(text);
     canvas.setActiveObject(text);
@@ -1056,9 +1059,10 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
   const handleZoom = (delta: number) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
+    const center = new fabric.Point((canvas.getWidth() || 0)/2, (canvas.getHeight() || 0)/2);
     const newZoom = Math.max(0.25, Math.min(4, zoom + delta));
+    canvas.zoomToPoint(center, newZoom);
     setZoom(newZoom);
-    canvas.setZoom(newZoom);
     canvas.requestRenderAll();
   };
 
@@ -1294,6 +1298,12 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
 
     // Mouse events for shapes
     canvas.on('mouse:down', (e) => {
+      if (selectedToolRef.current === 'move') {
+        isPanningRef.current = true;
+        panLastRef.current = { x: (e.e as any).clientX, y: (e.e as any).clientY };
+        canvas.setCursor('grabbing');
+        return;
+      }
       const tool = selectedToolRef.current;
       const isShapeTool = ['line', 'rect', 'circle', 'triangle'].includes(tool);
       
@@ -1345,6 +1355,18 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
     });
 
     canvas.on('mouse:move', (e) => {
+      if (isPanningRef.current && canvas.viewportTransform) {
+        const last = panLastRef.current;
+        if (last) {
+          const dx = (e.e as any).clientX - last.x;
+          const dy = (e.e as any).clientY - last.y;
+          const v = canvas.viewportTransform;
+          v[4] += dx;
+          v[5] += dy;
+          canvas.requestRenderAll();
+          panLastRef.current = { x: (e.e as any).clientX, y: (e.e as any).clientY };
+        }
+      }
       const pointer = canvas.getPointer(e.e);
       
       // 측정 모드 실시간 미리보기
@@ -1380,6 +1402,11 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
     });
 
     canvas.on('mouse:up', () => {
+      if (isPanningRef.current) {
+        isPanningRef.current = false;
+        panLastRef.current = null;
+        canvas.setCursor('default');
+      }
       if (isDrawingRef.current && draggingShapeRef.current) {
         const shape = draggingShapeRef.current;
         shape.set({ selectable: true, evented: true });
@@ -1405,6 +1432,57 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
       }
       dragStartRef.current = null;
       draggingShapeRef.current = null;
+    });
+
+    canvas.on('mouse:wheel', (opt: any) => {
+      let z = canvas.getZoom();
+      z *= 0.999 ** opt.e.deltaY;
+      z = Math.min(4, Math.max(0.25, z));
+      const point = new fabric.Point(opt.e.offsetX, opt.e.offsetY);
+      canvas.zoomToPoint(point, z);
+      setZoom(z);
+      opt.e.preventDefault();
+      opt.e.stopPropagation();
+    });
+
+    canvas.on('text:changed', (e: any) => {
+      const obj = e.target as any;
+      if (!obj) return;
+      const id = obj.objectId;
+      if (!id) return;
+      const serialized = (obj as fabric.Object).toObject() as SerializedObject;
+      const currentLayers = layersRef.current;
+      layersRef.current = currentLayers.map(layer => {
+        if (layer.id === activeLayerIdRef.current) {
+          const updated = layer.objects.map(o => {
+            return (o as any).objectId === id ? serialized : o;
+          });
+          return { ...layer, objects: updated };
+        }
+        return layer;
+      });
+      pendingLayerUpdateRef.current = true;
+      setLayers([...layersRef.current]);
+    });
+
+    canvas.on('editing:exited', (e: any) => {
+      const obj = e.target as any;
+      if (!obj) return;
+      const id = obj.objectId;
+      if (!id) return;
+      const serialized = (obj as fabric.Object).toObject() as SerializedObject;
+      const currentLayers = layersRef.current;
+      layersRef.current = currentLayers.map(layer => {
+        if (layer.id === activeLayerIdRef.current) {
+          const updated = layer.objects.map(o => {
+            return (o as any).objectId === id ? serialized : o;
+          });
+          return { ...layer, objects: updated };
+        }
+        return layer;
+      });
+      pendingLayerUpdateRef.current = true;
+      setLayers([...layersRef.current]);
     });
     
     // Handle path created (free drawing) - OPTIMIZED: update ref only
@@ -1795,6 +1873,13 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
   // ============ Keyboard Shortcuts ============
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const ae = document.activeElement as HTMLElement | null;
+      const isTyping = ae && ['input','textarea'].includes(ae.tagName.toLowerCase());
+      const activeObj = fabricCanvasRef.current?.getActiveObject() as any;
+      const isTextEditing = activeObj && (activeObj.isEditing === true);
+      if (isTyping || isTextEditing) {
+        return;
+      }
       // 측정 모드 단축키
       if (measureMode !== 'none') {
         if (e.key === 'Escape') {
@@ -2355,7 +2440,7 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
           </div>
 
           {/* Right Panel */}
-          <div className="w-72 border-l bg-white flex flex-col overflow-hidden">
+          <div className="w-72 border-l bg-white flex-col overflow-hidden hidden md:flex">
             {/* Layers Panel */}
             <AccordionPanel title="레이어" icon={Layers} id="layers">
               <div className="space-y-1">

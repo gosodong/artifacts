@@ -16,7 +16,10 @@ import {
   ZoomOut,
   Eye,
   EyeOff,
-  Trash2
+  Trash2,
+  Move,
+  Maximize2,
+  Minimize2
 } from 'lucide-react'
 
 export default function Editor() {
@@ -41,6 +44,9 @@ export default function Editor() {
   const [zoom, setZoom] = useState(1)
   const [brushColor, setBrushColor] = useState('#1e3a8a')
   const [brushWidth, setBrushWidth] = useState(2)
+  const [isPanning, setIsPanning] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
+  const lastPosRef = useRef<{x:number;y:number}|null>(null)
   useEffect(() => {
     if (selectedTool === 'pen') {
       setBrushWidth(2)
@@ -97,18 +103,56 @@ export default function Editor() {
         console.error('이미지 로드 실패:', error)
       })
 
-      // 도구 설정
       canvas.isDrawingMode = selectedTool === 'pen' || selectedTool === 'highlighter'
       if (canvas.isDrawingMode) {
         canvas.freeDrawingBrush.color = brushColor
         canvas.freeDrawingBrush.width = brushWidth
       }
 
-      // 이벤트 리스너
+      canvas.on('mouse:wheel', (opt: any) => {
+        let z = canvas.getZoom()
+        z *= 0.999 ** opt.e.deltaY
+        z = Math.min(3, Math.max(0.5, z))
+        const point = new fabric.Point(opt.e.offsetX, opt.e.offsetY)
+        canvas.zoomToPoint(point, z)
+        setZoom(z)
+        opt.e.preventDefault()
+        opt.e.stopPropagation()
+      })
+
+      canvas.on('mouse:down', (opt: any) => {
+        if (selectedTool === 'move') {
+          setIsPanning(true)
+          lastPosRef.current = { x: opt.e.clientX, y: opt.e.clientY }
+          canvas.setCursor('grabbing')
+        }
+      })
+
+      canvas.on('mouse:move', (opt: any) => {
+        if (isPanning && canvas.viewportTransform) {
+          const v = canvas.viewportTransform
+          const last = lastPosRef.current
+          if (last) {
+            const dx = opt.e.clientX - last.x
+            const dy = opt.e.clientY - last.y
+            v[4] += dx
+            v[5] += dy
+            canvas.requestRenderAll()
+            lastPosRef.current = { x: opt.e.clientX, y: opt.e.clientY }
+          }
+        }
+      })
+
+      canvas.on('mouse:up', () => {
+        if (isPanning) {
+          setIsPanning(false)
+          canvas.setCursor('default')
+        }
+      })
+
       canvas.on('path:created', (e) => {
         const path = e.path
         if (path) {
-          // 레이어로 저장
           addLayer({
             project_id: currentProject?.id || '',
             type: selectedTool,
@@ -144,22 +188,29 @@ export default function Editor() {
         fabricCanvasRef.current.freeDrawingBrush.color = brushColor
         fabricCanvasRef.current.freeDrawingBrush.width = width
       }
+      if (tool === 'move') {
+        fabricCanvasRef.current.isDrawingMode = false
+      }
     }
   }
 
   const handleZoomIn = () => {
     if (fabricCanvasRef.current) {
+      const c = fabricCanvasRef.current
+      const center = new fabric.Point(c.getWidth() / 2, c.getHeight() / 2)
       const newZoom = Math.min(zoom + 0.1, 3)
+      c.zoomToPoint(center, newZoom)
       setZoom(newZoom)
-      fabricCanvasRef.current.setZoom(newZoom)
     }
   }
 
   const handleZoomOut = () => {
     if (fabricCanvasRef.current) {
+      const c = fabricCanvasRef.current
+      const center = new fabric.Point(c.getWidth() / 2, c.getHeight() / 2)
       const newZoom = Math.max(zoom - 0.1, 0.5)
+      c.zoomToPoint(center, newZoom)
       setZoom(newZoom)
-      fabricCanvasRef.current.setZoom(newZoom)
     }
   }
 
@@ -274,15 +325,21 @@ export default function Editor() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* 좌측 툴바 */}
-      <div className="w-20 bg-white shadow-lg flex flex-col items-center py-4 space-y-2">
+    <div className={`min-h-screen bg-gray-50 flex ${fullscreen ? 'overflow-hidden' : ''}`}>
+      <div className={`bg-white shadow-lg flex flex-col items-center py-4 space-y-2 ${fullscreen ? 'hidden' : 'w-20'}`}>
         <button
           onClick={() => handleToolSelect('select')}
           className={`p-3 rounded-lg ${selectedTool === 'select' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
           title="선택"
         >
           <div className="w-5 h-5 border-2 border-current rounded-sm"></div>
+        </button>
+        <button
+          onClick={() => handleToolSelect('move')}
+          className={`p-3 rounded-lg ${selectedTool === 'move' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+          title="이동"
+        >
+          <Move className="h-5 w-5" />
         </button>
         
         <button
@@ -334,10 +391,9 @@ export default function Editor() {
         </button>
       </div>
 
-      {/* 중앙 캔버스 영역 */}
-      <div className="flex-1 flex flex-col">
+      <div className={`flex-1 flex flex-col ${fullscreen ? 'h-screen' : ''}`}>
         {/* 상단 툴바 */}
-        <div className="bg-white shadow-sm p-4 flex items-center justify-between">
+        <div className={`bg-white shadow-sm ${fullscreen ? 'p-2' : 'p-4'} flex items-center justify-between`}>
           <div className="flex items-center space-x-4">
             <h1 className="text-xl font-semibold text-gray-900">
               {currentImage.filename} 편집
@@ -388,6 +444,13 @@ export default function Editor() {
             >
               <ZoomIn className="h-4 w-4" />
             </button>
+            <button
+              onClick={() => setFullscreen(!fullscreen)}
+              className="p-2 rounded-md text-gray-600 hover:bg-gray-100"
+              title={fullscreen ? '축소 화면' : '전체 화면'}
+            >
+              {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </button>
             
             {/* 저장 버튼 */}
             <button
@@ -409,15 +472,13 @@ export default function Editor() {
         </div>
 
         {/* 캔버스 */}
-        <div className="flex-1 bg-gray-100 p-8 overflow-auto">
-          <div className="bg-white rounded-lg shadow-lg inline-block">
+        <div className={`flex-1 bg-gray-100 ${fullscreen ? 'p-0' : 'p-8'} overflow-auto`}>
+          <div className={`bg-white rounded-lg shadow-lg inline-block ${fullscreen ? 'w-full h-full' : ''}`}>
             <canvas ref={canvasRef} />
           </div>
         </div>
       </div>
-
-      {/* 우측 레이어 패널 */}
-      <div className="w-80 bg-white shadow-lg">
+      <div className={`bg-white shadow-lg ${fullscreen ? 'hidden' : 'w-80'}`}>
         <div className="p-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">레이어</h2>
         </div>
