@@ -1465,7 +1465,7 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
       setLayers([...layersRef.current]);
     });
 
-    canvas.on('editing:exited', (e: any) => {
+    canvas.on('text:editing:exited', (e: any) => {
       const obj = e.target as any;
       if (!obj) return;
       const id = obj.objectId;
