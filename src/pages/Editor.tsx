@@ -79,6 +79,7 @@ export default function Editor() {
       })
 
       fabricCanvasRef.current = canvas
+      ;(canvas.upperCanvasEl as HTMLCanvasElement).style.touchAction = 'none'
 
       // 이미지 로드
       fabric.Image.fromURL(currentImage.url).then((img) => {
@@ -122,23 +123,24 @@ export default function Editor() {
 
       canvas.on('mouse:down', (opt: any) => {
         if (selectedTool === 'move') {
+          const p = canvas.getPointer(opt.e)
           setIsPanning(true)
-          lastPosRef.current = { x: opt.e.clientX, y: opt.e.clientY }
+          lastPosRef.current = { x: p.x, y: p.y }
           canvas.setCursor('grabbing')
+          opt.e.preventDefault()
         }
       })
 
       canvas.on('mouse:move', (opt: any) => {
-        if (isPanning && canvas.viewportTransform) {
-          const v = canvas.viewportTransform
+        if (isPanning) {
+          const p = canvas.getPointer(opt.e)
           const last = lastPosRef.current
           if (last) {
-            const dx = opt.e.clientX - last.x
-            const dy = opt.e.clientY - last.y
-            v[4] += dx
-            v[5] += dy
-            canvas.requestRenderAll()
-            lastPosRef.current = { x: opt.e.clientX, y: opt.e.clientY }
+            const dx = p.x - last.x
+            const dy = p.y - last.y
+            canvas.relativePan(new fabric.Point(dx, dy))
+            lastPosRef.current = { x: p.x, y: p.y }
+            opt.e.preventDefault()
           }
         }
       })

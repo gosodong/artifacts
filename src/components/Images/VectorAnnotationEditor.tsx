@@ -248,10 +248,18 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
     setLayers(prev => {
       const newLayers = prev.map(l => l.id === layerId ? { ...l, visible: !l.visible } : l);
       layersRef.current = newLayers;
+      const canvas = fabricCanvasRef.current;
+      if (canvas) {
+        const layerVisible = newLayers.find(l => l.id === layerId)?.visible ?? true;
+        canvas.getObjects().forEach(obj => {
+          if (obj !== bgImageRef.current && (obj as any).layerId === layerId) {
+            obj.set({ visible: layerVisible });
+          }
+        });
+        canvas.requestRenderAll();
+      }
       return newLayers;
     });
-    // Trigger re-render after visibility change
-    setTimeout(() => renderLayersToCanvas(), 0);
   };
 
   const toggleLayerLock = (layerId: string) => {
@@ -373,10 +381,33 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
           const objs = await fabric.util.enlivenObjects([objData as Record<string, unknown>]);
           if (objs[0]) {
             const obj = objs[0] as fabric.FabricObject;
+            // 텍스트 객체 폭 보정 및 ID 복원
+            const asAny: any = obj;
+            const typ = asAny.type;
+            if ((typ === 'textbox' || typ === 'i-text') && typeof asAny.text === 'string') {
+              const fontSize = asAny.fontSize || 16;
+              const currentW = asAny.width || 0;
+              const estimate = Math.max(150, (asAny.text.length || 1) * (fontSize * 0.65) + 20);
+              const nextW = Math.max(currentW, estimate);
+              asAny.splitByGrapheme = true;
+              asAny.dirty = true;
+              asAny.set({ width: nextW, fontFamily: asAny.fontFamily || 'sans-serif', charSpacing: asAny.charSpacing || 0 });
+              if (typeof asAny.initDimensions === 'function') {
+                asAny.initDimensions();
+              }
+              if (typeof asAny.setCoords === 'function') {
+                asAny.setCoords();
+              }
+            }
+            if ((objData as any).objectId) {
+              asAny.objectId = (objData as any).objectId;
+            }
+            (asAny as any).layerId = layer.id;
             obj.set({ 
               opacity: (obj.opacity || 1) * layer.opacity,
               selectable: !layer.isReference,
               evented: !layer.isReference,
+              visible: layer.visible,
             });
             objectsToAdd.push(obj);
           }
@@ -997,12 +1028,14 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
       });
     }
     
-    ;(text as any).objectId = `obj-${Date.now()}`;
+    const oid = `obj-${Date.now()}`;
+    (text as any).objectId = oid;
     // 캔버스에 직접 추가하고 레이어 데이터도 업데이트
     canvas.add(text);
     canvas.setActiveObject(text);
     
     const serialized = text.toObject() as SerializedObject;
+    (serialized as any).objectId = oid;
     
     const newLayers = layersRef.current.map(l => {
       if (l.id === activeLayerIdRef.current) {
@@ -1025,34 +1058,22 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
     const activeObjs = canvas.getActiveObjects();
     if (activeObjs.length === 0) return;
     
-    // 캔버스에서 선택된 객체들 제거
-    activeObjs.forEach(obj => {
-      if (obj !== bgImageRef.current) {
-        canvas.remove(obj);
-      }
-    });
-    
+    const removedIds = activeObjs
+      .filter(obj => obj !== bgImageRef.current)
+      .map(obj => (obj as any).objectId)
+      .filter(Boolean);
+    activeObjs.forEach(obj => { if (obj !== bgImageRef.current) { canvas.remove(obj); } });
     canvas.discardActiveObject();
     canvas.requestRenderAll();
-    
-    // 캔버스에 남아있는 객체들을 직렬화하여 현재 레이어에 저장
-    const remainingObjects = canvas.getObjects()
-      .filter(obj => obj !== bgImageRef.current)
-      .map(obj => obj.toObject() as SerializedObject);
-    
-    // 현재 활성 레이어만 업데이트 (다른 레이어는 유지)
     const newLayers = layersRef.current.map(layer => {
       if (layer.id === activeLayerIdRef.current) {
-        return { ...layer, objects: remainingObjects };
+        const nextObjects = layer.objects.filter(o => !removedIds.includes((o as any).objectId));
+        return { ...layer, objects: nextObjects };
       }
       return layer;
     });
-    
     layersRef.current = newLayers;
     setLayers(newLayers);
-    
-    console.log('삭제 후 레이어 상태:', JSON.stringify(newLayers.map(l => ({ id: l.id, objectCount: l.objects.length }))));
-    
     saveState();
   };
 
@@ -1257,6 +1278,7 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
       width: 1000, height: 700, backgroundColor: '#f3f4f6', selection: true,
     });
     fabricCanvasRef.current = canvas;
+    (canvas.upperCanvasEl as HTMLCanvasElement).style.touchAction = 'none';
 
     // Load background image
     const img = new Image();
@@ -1279,8 +1301,15 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
       if (initialAnnotations && typeof initialAnnotations === 'object') {
         const data = initialAnnotations as any;
         if (data.layers?.length > 0) {
-          setLayers(data.layers);
-          layersRef.current = data.layers;
+          const withIds = (data.layers as any[]).map((layer: any) => ({
+            ...layer,
+            objects: (layer.objects || []).map((o: any, idx: number) => ({
+              objectId: o.objectId || `obj-${Date.now()}-${idx}`,
+              ...o,
+            }))
+          }));
+          setLayers(withIds);
+          layersRef.current = withIds;
           // Render layers after loading
           setTimeout(() => renderLayersToCanvas(), 100);
         }
@@ -1299,9 +1328,11 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
     // Mouse events for shapes
     canvas.on('mouse:down', (e) => {
       if (selectedToolRef.current === 'move') {
+        const p = canvas.getPointer(e.e);
         isPanningRef.current = true;
-        panLastRef.current = { x: (e.e as any).clientX, y: (e.e as any).clientY };
+        panLastRef.current = { x: p.x, y: p.y };
         canvas.setCursor('grabbing');
+        e.e.preventDefault();
         return;
       }
       const tool = selectedToolRef.current;
@@ -1355,19 +1386,15 @@ const VectorAnnotationEditor: React.FC<VectorAnnotationEditorProps> = ({
     });
 
     canvas.on('mouse:move', (e) => {
-      if (isPanningRef.current && canvas.viewportTransform) {
-        const last = panLastRef.current;
-        if (last) {
-          const dx = (e.e as any).clientX - last.x;
-          const dy = (e.e as any).clientY - last.y;
-          const v = canvas.viewportTransform;
-          v[4] += dx;
-          v[5] += dy;
-          canvas.requestRenderAll();
-          panLastRef.current = { x: (e.e as any).clientX, y: (e.e as any).clientY };
-        }
-      }
       const pointer = canvas.getPointer(e.e);
+      if (isPanningRef.current && panLastRef.current) {
+        const dx = pointer.x - panLastRef.current.x;
+        const dy = pointer.y - panLastRef.current.y;
+        canvas.relativePan(new fabric.Point(dx, dy));
+        panLastRef.current = { x: pointer.x, y: pointer.y };
+        e.e.preventDefault();
+        return;
+      }
       
       // 측정 모드 실시간 미리보기
       if (measureMode !== 'none' && measurePointsRef.current.length > 0) {
